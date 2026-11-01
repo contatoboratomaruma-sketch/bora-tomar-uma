@@ -295,6 +295,39 @@ details.manual summary{cursor:pointer;font-size:var(--fss);font-weight:600;color
   .calc-disp{font-size:30px;min-height:60px}
   .calc-grid button{padding:15px 0;font-size:21px}
 }
+#avisoNuvem{animation:none;align-items:center;gap:12px}
+
+/* ===== PESQUISA / EDIÇÃO / DELIVERY ===== */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:600;display:none;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto}
+.modal-bg.open{display:flex}
+.modal-box{background:var(--surface);border-radius:var(--r);padding:20px;width:100%;max-width:560px;margin:auto}
+.nota{font-size:var(--fsx);color:var(--muted);line-height:1.6;margin:6px 0 10px}
+.busca-bar{display:flex;gap:8px;align-items:center;margin-bottom:12px}
+.busca-bar input{flex:1}
+.deliv-bar{display:flex;gap:8px;align-items:center;margin:12px 0 8px;flex-wrap:wrap}
+.deliv-bar .pay-btn{flex:0 0 auto;padding:10px 20px}
+.deliv-panel{border:2px solid var(--brand);border-radius:var(--rs);padding:12px;margin-bottom:8px;background:var(--surface)}
+.deliv-resumo{font-size:var(--fss);color:var(--muted);line-height:1.8;margin-top:8px}
+.cc-box{background:var(--surface2);border-radius:var(--rs);padding:12px;margin-top:8px}
+@media(min-width:900px){
+  .modal-box{max-width:620px;padding:26px}
+  #page-estoque.active>.busca-bar{grid-column:1/-1}
+  .deliv-bar .pay-btn{padding:13px 26px}
+}
+
+/* ===== VALIDADE / REPOSIÇÃO ===== */
+.alerta-validade-box{display:flex;align-items:center;gap:9px;background:#ffd93b;color:#4a3a00;border:1px solid #e0b800;border-radius:var(--rs);padding:10px 13px;font-size:var(--fss);font-weight:700;margin-bottom:10px;line-height:1.5}
+.alerta-validade-box i{font-size:18px;flex-shrink:0}
+.prod-card.venc-alerta{border:2px solid #e0b800;background:var(--warn-bg)}
+.prod-card.vencido{border:2px solid #c00000}
+.val-line{font-size:var(--fss);padding:6px 10px;border-radius:var(--rs);margin-bottom:8px;background:var(--surface2);color:var(--muted)}
+.val-line.alerta{background:#ffd93b;color:#4a3a00;font-weight:700}
+.val-line.vencido{background:#c00000;color:#fff;font-weight:700}
+.rep-fator{width:70px;display:inline-block;padding:4px 8px;text-align:center;font-weight:700}
+@media(min-width:900px){
+  #page-estoque.active>.alerta-validade-box{grid-column:1/-1}
+  .rep-fator{padding:6px 10px}
+}
 </style>
 </head>
 <body>
@@ -366,16 +399,26 @@ CREATE POLICY "all" ON feedbacks FOR ALL USING (true) WITH CHECK (true);</code>
 
   <div class="tabs">
     <div class="tab active" onclick="goTo('estoque')"><i class="ti ti-box"></i> Estoque</div>
+    <div class="tab" onclick="goTo('reposicao')"><i class="ti ti-shopping-cart-plus"></i> Reposição</div>
     <div class="tab" onclick="goTo('caixa')"><i class="ti ti-cash"></i> Caixa</div>
     <div class="tab" onclick="goTo('vendidos')"><i class="ti ti-trophy"></i> Top Vendas</div>
     <div class="tab" onclick="goTo('feedback')"><i class="ti ti-message"></i> Feedback</div>
   </div>
 
   <div class="content">
+    <div id="avisoNuvem" class="alerta-critico-box" style="display:none"><i class="ti ti-cloud-off"></i><span>Sem conexão com a nuvem (o projeto do Supabase pode estar pausado). O que você cadastrar ou vender agora NÃO é salvo na nuvem e não aparece em outros aparelhos.</span><button class="btn sm" onclick="recarregarDados(true)" style="margin-left:auto;flex-shrink:0">Tentar de novo</button></div>
+    <div id="avisoValidade" style="display:none;margin-bottom:12px;padding:12px 14px;border-radius:var(--rs);background:var(--warn-bg);color:var(--warn-tx);font-size:var(--fss);font-weight:600;line-height:1.6">
+      📅 Para a <strong>validade</strong> ser salva na nuvem, falta criar uma coluna no Supabase (1 minuto). Abra o <strong>SQL Editor</strong> → <strong>New query</strong>, cole o comando abaixo e clique em <strong>Run</strong>. Enquanto isso, o resto do sistema funciona normalmente.
+      <code class="sql" id="sqlValidade">ALTER TABLE produtos ADD COLUMN IF NOT EXISTS validade DATE;
+NOTIFY pgrst, 'reload schema';</code>
+      <button class="btn primary sm" style="margin-top:8px" onclick="copiarSQLValidade()"><i class="ti ti-copy"></i> Copiar comando</button>
+    </div>
+    <div id="avisoLocal" style="display:none;margin-bottom:12px;padding:12px 14px;border-radius:var(--rs);background:var(--warn-bg);color:var(--warn-tx);font-size:var(--fss);font-weight:600;line-height:1.6"><span></span><div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap"><button class="btn primary sm" onclick="migrarLocais()">Enviar para a nuvem</button><button class="btn sm" onclick="descartarLocais()">Descartar do navegador</button></div></div>
 
     <!-- ===== ESTOQUE ===== -->
     <div id="page-estoque" class="page active">
       <div id="alertaCriticoBanner" class="alerta-critico-box" style="display:none"></div>
+      <div id="alertaValidadeBanner" class="alerta-validade-box" style="display:none"></div>
       <div class="mg">
         <div class="metric"><label>Total produtos</label><div class="val" id="totalItens">—</div></div>
         <div class="metric"><label>Alertas mínimo</label><div class="val r" id="totalAlertas">—</div></div>
@@ -417,10 +460,12 @@ CREATE POLICY "all" ON feedbacks FOR ALL USING (true) WITH CHECK (true);</code>
           <div><label class="f">💰 Preço de compra (R$)</label><input type="number" id="prodPrecoC" placeholder="0,00" step="0.01" oninput="calcMargem()"></div>
           <div><label class="f">🏷️ Preço de venda (R$)</label><input type="number" id="prodPrecoV" placeholder="0,00" step="0.01" oninput="calcMargem()"></div>
         </div>
+        <div class="row"><div><label class="f">📅 Validade (opcional)</label><input type="date" id="prodValidade"></div></div>
         <div id="margemCalc" style="display:none;margin-bottom:8px;padding:8px 12px;border-radius:var(--rs);font-size:var(--fss);font-weight:600"></div>
         <button class="btn primary full" onclick="addProduto()"><i class="ti ti-plus"></i> Adicionar produto</button>
       </div>
 
+      <div class="col-dir">
       <div class="card">
         <div class="card-title"><i class="ti ti-file-spreadsheet"></i> Importar produtos por planilha</div>
         <p style="font-size:var(--fss);color:var(--muted);line-height:1.6;margin-bottom:10px">Cadastre vários produtos de uma vez: baixe o modelo, preencha (código, nome, quantidade e preços) e envie aqui. Aceita .xlsx e .csv.</p>
@@ -431,12 +476,39 @@ CREATE POLICY "all" ON feedbacks FOR ALL USING (true) WITH CHECK (true);</code>
         </div>
         <div id="impPreview" style="display:none;margin-top:10px"></div>
       </div>
+      <div class="card">
+        <div class="card-title"><i class="ti ti-device-mobile"></i> Usar no celular</div>
+        <p style="font-size:var(--fss);color:var(--muted);line-height:1.6;margin-bottom:10px">Copie o link abaixo, envie para o seu celular (por exemplo, pelo WhatsApp para você mesma) e abra. O sistema já entra conectado, e os produtos aparecem igual ao computador. Os dados se atualizam sozinhos a cada 15 segundos.</p>
+        <button class="btn full" onclick="copiarLinkAcesso()"><i class="ti ti-copy"></i> Copiar link para o celular</button>
+        <p style="font-size:var(--fsx);color:var(--hint);line-height:1.6;margin-top:8px">Esse link dá acesso aos dados da loja. Envie só para quem trabalha com você.</p>
+      </div>
+      </div>
 
-      <div class="section-title"><span>Produtos cadastrados <span id="estoqueCount" style="font-size:12px;color:var(--muted);font-weight:500"></span></span><button class="btn warn sm" onclick="aplicarMinimo8()"><i class="ti ti-adjustments"></i> Mínimo 8 em todos</button></div>
+      <div class="section-title"><span>Produtos cadastrados <span id="estoqueCount" style="font-size:12px;color:var(--muted);font-weight:500"></span></span><span style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" onclick="recarregarDados(true)"><i class="ti ti-refresh"></i> Atualizar</button><button class="btn warn sm" onclick="aplicarMinimo8()"><i class="ti ti-adjustments"></i> Mínimo 8 em todos</button></span></div>
+      <div class="busca-bar"><input type="search" id="buscaProd" placeholder="🔍 Pesquisar produto por nome, código ou categoria" oninput="renderEstoque()" autocomplete="off"><button class="btn sm" onclick="limparBusca()"><i class="ti ti-x"></i> Limpar</button></div>
       <div id="estoqueList"><div class="loading"><div class="spinner"></div> Carregando...</div></div>
     </div>
 
     <!-- ===== CAIXA ===== -->
+    <!-- ===== REPOSIÇÃO ===== -->
+    <div id="page-reposicao" class="page">
+      <div class="mg">
+        <div class="metric"><label>Produtos a repor</label><div class="val r" id="repQtd">—</div></div>
+        <div class="metric"><label>Unidades a comprar</label><div class="val" id="repUn">—</div></div>
+        <div class="metric"><label>Custo estimado</label><div class="val g" id="repCusto">—</div></div>
+      </div>
+      <div class="card">
+        <div class="card-title"><i class="ti ti-shopping-cart-plus"></i> Lista de reposição (o que comprar)</div>
+        <p class="nota">Entram na lista os produtos com estoque <strong>crítico</strong> (mínimo + 2 ou menos) ou zerado. A quantidade sugerida leva o estoque até
+          <input type="text" inputmode="decimal" id="repFator" class="rep-fator" onchange="mudaRepFator()" autocomplete="off"> vezes o estoque mínimo.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+          <button class="btn primary sm" onclick="copiarReposicao()"><i class="ti ti-copy"></i> Copiar lista (WhatsApp)</button>
+          <button class="btn sm" onclick="baixarReposicao()"><i class="ti ti-download"></i> Baixar planilha</button>
+        </div>
+        <div id="repLista"></div>
+      </div>
+    </div>
+
     <div id="page-caixa" class="page">
       <div class="mg">
         <div class="metric"><label>Saldo atual</label><div class="val g" id="saldoCaixa">—</div></div>
@@ -499,7 +571,21 @@ CREATE POLICY "all" ON feedbacks FOR ALL USING (true) WITH CHECK (true);</code>
         <div class="cart-head"><span>🛒 Carrinho</span><button class="btn sm" onclick="limparCarrinho()"><i class="ti ti-eraser"></i> Limpar</button></div>
         <div id="carrinho" class="cart"><div class="empty" style="padding:14px 0">Carrinho vazio — passe o produto no leitor</div></div>
 
-        <div class="total-box"><span>Valor total</span><strong id="vendaTotal">R$ 0,00</strong></div>
+        <div class="deliv-bar">
+          <button class="pay-btn" id="btnDelivery" onclick="toggleDelivery()">🛵 Delivery</button>
+          <button class="btn sm" onclick="abrirConfigDelivery()"><i class="ti ti-settings"></i> Configurar delivery</button>
+        </div>
+        <div id="delivPanel" class="deliv-panel" style="display:none">
+          <div id="delivAviso" class="nota" style="display:none;background:var(--warn-bg);color:var(--warn-tx);padding:8px 10px;border-radius:var(--rs);font-weight:600">Valores de exemplo. Ajuste a taxa de cada distância em “Configurar delivery” (use o custo da sua moto).</div>
+          <div class="row">
+            <div><label class="f">Distância / zona</label><select id="delivZona" onchange="mudaZona()"></select></div>
+            <div style="max-width:160px"><label class="f">Taxa de entrega (R$)</label><input type="text" inputmode="decimal" id="delivTaxa" placeholder="0,00" autocomplete="off" oninput="mudaTaxa()"></div>
+          </div>
+          <label class="f">Cliente / endereço (opcional)</label>
+          <input type="text" id="delivEnd" maxlength="60" placeholder="Ex.: Rua das Flores, 123" autocomplete="off">
+          <div id="delivResumo" class="deliv-resumo"></div>
+        </div>
+        <div class="total-box"><span id="vendaTotalLbl">Valor total</span><strong id="vendaTotal">R$ 0,00</strong></div>
 
         <label class="f">Forma de pagamento</label>
         <div class="pay-row">
@@ -517,7 +603,7 @@ CREATE POLICY "all" ON feedbacks FOR ALL USING (true) WITH CHECK (true);</code>
         <details class="manual">
           <summary>Adicionar sem o leitor (escolher o produto na lista)</summary>
           <div class="row" style="margin-top:10px">
-            <div><label class="f">Produto</label><select id="vendaProd" onchange="atualizarPrecoVenda()"></select></div>
+            <div><label class="f">Produto</label><input type="search" id="vendaBusca" placeholder="Pesquisar produto..." oninput="renderVendas()" autocomplete="off" style="margin-bottom:8px"><select id="vendaProd" onchange="atualizarPrecoVenda()"></select></div>
             <div style="max-width:90px"><label class="f">Qtd</label><input type="number" id="vendaQtd" value="1" min="1" oninput="atualizarPrecoVenda()"></div>
           </div>
           <div id="vendaInfo" style="display:none;margin-bottom:8px;padding:8px 12px;border-radius:var(--rs);background:var(--ok-bg);color:var(--ok-tx);font-size:var(--fss);font-weight:600"></div>
@@ -555,6 +641,54 @@ CREATE POLICY "all" ON feedbacks FOR ALL USING (true) WITH CHECK (true);</code>
 
   </div>
 </div>
+<div class="modal-bg" id="editModal" onkeydown="if(event.key==='Escape')fecharEdicao()">
+  <div class="modal-box" onkeydown="if(event.key==='Enter'&&event.target.tagName==='INPUT'){event.preventDefault();salvarEdicao();}">
+    <div class="card-title"><i class="ti ti-edit"></i> Editar produto</div>
+    <label class="f">Código de barras</label><input type="text" id="edCodigo" autocomplete="off" placeholder="Leia no leitor ou digite">
+    <label class="f" style="margin-top:10px">Nome do produto</label><input type="text" id="edNome" autocomplete="off">
+    <div class="row" style="margin-top:10px">
+      <div><label class="f">Categoria</label><select id="edCat"></select></div>
+      <div style="max-width:120px"><label class="f">Unidade</label><select id="edUnit"><option>un</option><option>cx</option><option>fardo</option><option>lt</option><option>kg</option></select></div>
+    </div>
+    <div class="row">
+      <div><label class="f">Qtd atual</label><input type="number" id="edQtd" min="0"></div>
+      <div><label class="f">Estoque mín.</label><input type="number" id="edMin" min="0"></div>
+    </div>
+    <div class="row">
+      <div><label class="f">Preço de compra (R$)</label><input type="text" inputmode="decimal" id="edPc" autocomplete="off"></div>
+      <div><label class="f">Preço de venda (R$)</label><input type="text" inputmode="decimal" id="edPv" autocomplete="off"></div>
+    </div>
+    <label class="f">📅 Validade (opcional)</label>
+    <div style="display:flex;gap:8px;margin-bottom:6px"><input type="date" id="edValidade"><button class="btn sm" onclick="document.getElementById('edValidade').value=''">Limpar</button></div>
+    <div style="display:flex;gap:8px;margin-top:8px"><button class="btn primary full" onclick="salvarEdicao()"><i class="ti ti-check"></i> Salvar</button><button class="btn full" onclick="fecharEdicao()">Cancelar</button></div>
+  </div>
+</div>
+<div class="modal-bg" id="delivModal" onkeydown="if(event.key==='Escape')fecharConfigDelivery()">
+  <div class="modal-box">
+    <div class="card-title"><i class="ti ti-motorbike"></i> Configurar delivery (entrega com a sua moto)</div>
+    <p class="nota">Como você entrega com a sua própria moto e vende direto, não há a comissão de 12% do aplicativo. O que precisa ser coberto é o <strong>custo da corrida</strong>, que depende da distância. Por isso o sistema cobra uma <strong>taxa de entrega por distância</strong>. O acréscimo em % sobre os produtos é opcional.</p>
+    <label class="f">Acréscimo sobre o preço dos produtos no delivery (%)</label>
+    <input type="text" inputmode="decimal" id="cfgAcr" placeholder="0" autocomplete="off">
+    <p class="nota">Deixe 0 para cobrar só a taxa de entrega. Use, por exemplo, 3,2% se quiser cobrir a taxa de cartão ou Pix online.</p>
+    <label class="f">Taxa de entrega por distância (valores de exemplo, ajuste)</label>
+    <div class="row"><div><input type="text" id="cfgZn0" placeholder="Nome (ex.: Até 2 km)"></div><div style="max-width:130px"><input type="text" inputmode="decimal" id="cfgZv0" placeholder="R$"></div></div>
+    <div class="row"><div><input type="text" id="cfgZn1" placeholder="Nome"></div><div style="max-width:130px"><input type="text" inputmode="decimal" id="cfgZv1" placeholder="R$"></div></div>
+    <div class="row"><div><input type="text" id="cfgZn2" placeholder="Nome"></div><div style="max-width:130px"><input type="text" inputmode="decimal" id="cfgZv2" placeholder="R$"></div></div>
+    <div class="row"><div><input type="text" id="cfgZn3" placeholder="Nome"></div><div style="max-width:130px"><input type="text" inputmode="decimal" id="cfgZv3" placeholder="R$"></div></div>
+    <details class="manual">
+      <summary>Quanto custa uma entrega com a minha moto?</summary>
+      <div class="cc-box">
+        <div class="row"><div><label class="f">Distância só da ida (km)</label><input type="text" inputmode="decimal" id="ccKm" oninput="calcCustoEntrega()" placeholder="3"></div><div><label class="f">Consumo da moto (km por litro)</label><input type="text" inputmode="decimal" id="ccCons" oninput="calcCustoEntrega()" placeholder="35"></div></div>
+        <div class="row"><div><label class="f">Preço do litro (R$)</label><input type="text" inputmode="decimal" id="ccLitro" oninput="calcCustoEntrega()" placeholder="6,50"></div><div><label class="f">Desgaste por km (R$)</label><input type="text" inputmode="decimal" id="ccDes" oninput="calcCustoEntrega()" placeholder="0,20"></div></div>
+        <label class="f">Quanto vale o seu tempo por entrega (R$)</label>
+        <input type="text" inputmode="decimal" id="ccTempo" oninput="calcCustoEntrega()" placeholder="3,00">
+        <div id="ccRes" class="deliv-resumo"></div>
+        <p class="nota">Desgaste = óleo, pneus, corrente, revisões divididos pelos km rodados. Os números nos campos acima são só exemplos de preenchimento. Use os seus e cobre pelo menos o custo calculado.</p>
+      </div>
+    </details>
+    <div style="display:flex;gap:8px;margin-top:12px"><button class="btn primary full" onclick="salvarConfigDelivery()"><i class="ti ti-check"></i> Salvar</button><button class="btn full" onclick="fecharConfigDelivery()">Cancelar</button></div>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -565,9 +699,24 @@ let currentStar=0;
 let scannerCtx=null; // 'estoque' | 'caixa' | 'venda'
 let zxingReader=null;
 let scanStream=null;
+let nuvemOk=true, pend=0, recarregando=false;
+let delivery={on:false}, editandoId=null;
+let temValidade=null;
+let repFator=carregarRepFator();
+let cfgDelivery=carregarCfgDelivery();
 
 /* ========== INIT ========== */
 (function(){
+  try{
+    const h=new URLSearchParams(location.hash.replace(/^#/,''));
+    const u=h.get('url'), k=h.get('key');
+    if(u&&k){
+      localStorage.setItem('btu_sb_url',u.replace(/\/$/,''));
+      localStorage.setItem('btu_sb_key',k);
+      localStorage.removeItem('btu_local');
+      history.replaceState(null,'',location.pathname+location.search);
+    }
+  }catch{}
   const url=localStorage.getItem('btu_sb_url');
   const key=localStorage.getItem('btu_sb_key');
   if(url&&key){SB_URL=url;SB_KEY=key;entrar(false);}
@@ -590,6 +739,7 @@ function trocarConexao(){
 }
 function usarLocal(){USE_LOCAL=true;localStorage.setItem('btu_local','1');entrar(true);}
 function entrar(local){
+  temValidade=local?true:null;
   document.getElementById('setupScreen').style.display='none';
   document.getElementById('app').style.display='flex';
   document.getElementById('app').style.flexDirection='column';
@@ -600,24 +750,44 @@ function entrar(local){
 }
 
 /* ========== SUPABASE / LOCAL ========== */
+function SB_H(){return {apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,'Content-Type':'application/json'};}
 async function sbGet(t,ord='id'){
   if(USE_LOCAL)return lGet(t);
-  try{const r=await fetch(`${SB_URL}/rest/v1/${t}?order=${ord}.asc`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,'Content-Type':'application/json'}});
-  if(!r.ok)throw new Error();return await r.json();}
-  catch{return lGet(t);}
+  try{
+    const r=await fetch(`${SB_URL}/rest/v1/${t}?order=${ord}.asc`,{headers:SB_H()});
+    if(!r.ok)throw new Error(r.status);
+    const j=await r.json(); setNuvem(true); return j;
+  }catch{ setNuvem(false); return lGet(t); }
 }
 async function sbIns(t,d){
   if(USE_LOCAL)return lIns(t,d);
-  try{const r=await fetch(`${SB_URL}/rest/v1/${t}`,{method:'POST',headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,'Content-Type':'application/json',Prefer:'return=representation'},body:JSON.stringify(d)});
-  if(!r.ok)throw new Error();return await r.json();}catch{return lIns(t,d);}
+  pend++;
+  try{
+    const r=await fetch(`${SB_URL}/rest/v1/${t}`,{method:'POST',headers:{...SB_H(),Prefer:'return=representation'},body:JSON.stringify(t==='produtos'?semValidade(d):d)});
+    if(!r.ok)throw new Error(r.status);
+    const j=await r.json(); setNuvem(true); return j;
+  }catch{ setNuvem(false); toast('⚠️ NÃO salvou na nuvem: ficou só neste aparelho'); return lIns(t,d); }
+  finally{ pend--; }
 }
 async function sbUpd(t,id,d){
   if(USE_LOCAL)return lUpd(t,id,d);
-  try{await fetch(`${SB_URL}/rest/v1/${t}?id=eq.${id}`,{method:'PATCH',headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,'Content-Type':'application/json'},body:JSON.stringify(d)});}catch{}
+  pend++;
+  try{
+    const r=await fetch(`${SB_URL}/rest/v1/${t}?id=eq.${id}`,{method:'PATCH',headers:SB_H(),body:JSON.stringify(t==='produtos'?semValidade(d):d)});
+    if(!r.ok)throw new Error(r.status);
+    setNuvem(true);
+  }catch{ setNuvem(false); toast('⚠️ NÃO atualizou na nuvem'); }
+  finally{ pend--; }
 }
 async function sbDel(t,id){
   if(USE_LOCAL)return lDel(t,id);
-  try{await fetch(`${SB_URL}/rest/v1/${t}?id=eq.${id}`,{method:'DELETE',headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,'Content-Type':'application/json'}});}catch{}
+  pend++;
+  try{
+    const r=await fetch(`${SB_URL}/rest/v1/${t}?id=eq.${id}`,{method:'DELETE',headers:SB_H()});
+    if(!r.ok)throw new Error(r.status);
+    setNuvem(true);
+  }catch{ setNuvem(false); toast('⚠️ NÃO apagou na nuvem'); }
+  finally{ pend--; }
 }
 function lGet(t){try{return JSON.parse(localStorage.getItem('btu_'+t)||'[]');}catch{return [];}}
 function lIns(t,d){const rows=lGet(t);let id=Date.now();const usados=new Set(rows.map(r=>r.id));while(usados.has(id))id++;const row={...d,id};rows.push(row);localStorage.setItem('btu_'+t,JSON.stringify(rows));return[row];}
@@ -632,11 +802,11 @@ function goTo(tab){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   document.getElementById('page-'+tab).classList.add('active');
-  ['estoque','caixa','vendidos','feedback'].forEach((n,i)=>{if(n===tab)document.querySelectorAll('.tab')[i].classList.add('active');});
+  ['estoque','reposicao','caixa','vendidos','feedback'].forEach((n,i)=>{if(n===tab)document.querySelectorAll('.tab')[i].classList.add('active');});
   renderAll();
   if(tab==='vendidos')setTimeout(focarVenda,60);
 }
-function renderAll(){renderEstoque();renderCaixa();renderVendas();renderFeedback();}
+function renderAll(){renderEstoque();renderReposicao();renderCaixa();renderVendas();renderFeedback();}
 
 /* ========== LOAD ========== */
 async function carregarTudo(){
@@ -654,6 +824,7 @@ async function carregarTudo(){
     for(const p of ex){const r=await sbIns('produtos',p);if(r)produtos.push(r[0]);}
   }
   renderAll();
+  checarColunaValidade();
 }
 
 /* ========== VENDA: CARRINHO + PAGAMENTO + TROCO ========== */
@@ -740,6 +911,7 @@ function adicionarAoCarrinho(p,qtd){
   let aviso='';
   if((parseInt(p.qtd)||0)<l.qtd)aviso+=` · 🔴 estoque cadastrado: ${parseInt(p.qtd)||0}`;
   if(!(precoDe(p)>0))aviso+=' · ⚠️ sem preço de venda cadastrado';
+  { const sv=statusValidade(p); if(sv==='vencido')aviso+=' · 🔴 PRODUTO VENCIDO'; else if(sv==='alerta')aviso+=` · 🟡 validade: ${textoDias(diasParaVencer(p))}`; }
   setVendaStatus(`➕ <strong>${escH(p.nome)}</strong> — ${fmt(precoDe(p))}<br><span style="font-weight:500">No carrinho: ${l.qtd} un${aviso}</span>`,'ok');
 }
 function mudaQtdCarrinho(id,d){
@@ -753,9 +925,22 @@ function limparCarrinho(){
   if(carrinho.length&&!confirm('Limpar todos os itens do carrinho?'))return;
   resetarVenda(); focarVenda();
 }
-function totalCarrinho(){
-  return carrinho.reduce((a,l)=>{ const p=produtos.find(x=>x.id===l.id); return a+(p?precoDe(p)*l.qtd:0); },0);
+function r2(x){ return Math.round((x+Number.EPSILON)*100)/100; }
+function acrescimoDelivery(){ return delivery.on ? (parseFloat(cfgDelivery.acr)||0)/100 : 0; }
+function precoLinha(p){ return r2(precoDe(p)*(1+acrescimoDelivery())); }
+function valorLinha(p,qtd){ return r2(precoDe(p)*(1+acrescimoDelivery())*qtd); }
+function subtotalBalcao(){
+  return r2(carrinho.reduce((a,l)=>{ const p=produtos.find(x=>x.id===l.id); return a+(p?precoDe(p)*l.qtd:0); },0));
 }
+function totalCarrinho(){
+  return r2(carrinho.reduce((a,l)=>{ const p=produtos.find(x=>x.id===l.id); return a+(p?valorLinha(p,l.qtd):0); },0));
+}
+function taxaEntrega(){
+  if(!delivery.on)return 0;
+  const el=document.getElementById('delivTaxa'); const v=el?paraNum(el.value):null;
+  return v==null?0:Math.max(0,r2(v));
+}
+function totalGeral(){ return r2(totalCarrinho()+taxaEntrega()); }
 
 function renderCarrinho(){
   const el=document.getElementById('carrinho'); if(!el)return;
@@ -766,16 +951,17 @@ function renderCarrinho(){
     el.innerHTML=carrinho.map(l=>{
       const p=produtos.find(x=>x.id===l.id);
       return `<div class="cart-row">
-        <div class="cart-info"><div class="cart-name">${escH(p.nome)}</div><div class="cart-sub">${fmt(precoDe(p))} cada</div></div>
+        <div class="cart-info"><div class="cart-name">${escH(p.nome)}</div><div class="cart-sub">${fmt(precoLinha(p))} cada</div></div>
         <button class="btn sm icon" onclick="mudaQtdCarrinho(${l.id},-1)" title="Diminuir"><i class="ti ti-minus"></i></button>
         <span class="cart-q">${l.qtd}</span>
         <button class="btn sm icon" onclick="mudaQtdCarrinho(${l.id},1)" title="Aumentar"><i class="ti ti-plus"></i></button>
-        <div class="cart-val">${fmt(precoDe(p)*l.qtd)}</div>
+        <div class="cart-val">${fmt(valorLinha(p,l.qtd))}</div>
         <button class="btn danger sm icon" onclick="removerDoCarrinho(${l.id})" title="Tirar do carrinho"><i class="ti ti-trash"></i></button>
       </div>`;
     }).join('');
   }
-  const t=document.getElementById('vendaTotal'); if(t)t.textContent=fmt(totalCarrinho());
+  const t=document.getElementById('vendaTotal'); if(t)t.textContent=fmt(totalGeral());
+  renderDeliveryResumo();
   atualizarTroco();
 }
 
@@ -799,7 +985,7 @@ function selecionarPag(k){
 function atualizarTroco(){
   const pagoEl=document.getElementById('vendaPago'), trocoEl=document.getElementById('vendaTroco');
   if(!pagoEl||!trocoEl)return;
-  const total=totalCarrinho();
+  const total=totalGeral();
   if(formaPag&&formaPag!=='dinheiro'){
     pagoEl.readOnly=true;
     pagoEl.value=total>0?total.toFixed(2).replace('.',','):'';
@@ -813,7 +999,8 @@ function atualizarTroco(){
 }
 
 function resetarVenda(){
-  carrinho=[]; formaPag='';
+  carrinho=[]; formaPag=''; delivery={on:false};
+  { const tx=document.getElementById('delivTaxa'), en=document.getElementById('delivEnd'); if(tx)tx.value=''; if(en)en.value=''; renderDelivery(); }
   Object.keys(PAGS).forEach(x=>{ const b=document.getElementById('pay-'+x); if(b)b.classList.remove('sel'); });
   const pagoEl=document.getElementById('vendaPago'); if(pagoEl){pagoEl.value='';pagoEl.readOnly=false;}
   renderCarrinho();
@@ -821,7 +1008,7 @@ function resetarVenda(){
 
 // Grava um item da venda: caixa + ranking + baixa no estoque (forma de pagamento vai na descrição)
 async function registrarItemVenda(p,qtd,pagNome){
-  const receita=precoDe(p)*qtd;
+  const receita=valorLinha(p,qtd);
   const mov=await sbIns('movimentacoes',{tipo:'in',descricao:`Venda: ${qtd}x ${p.nome} [${pagNome}]`,valor:receita,codigo:p.codigo||'',ts:new Date().toISOString()});
   if(mov&&mov[0])movimentacoes.push(mov[0]);
   const v=vendas.find(x=>x.prod_id===p.id);
@@ -835,7 +1022,7 @@ async function concluirVenda(){
   if(concluindo)return;
   if(!carrinho.length){toast('⚠️ O carrinho está vazio');return;}
   if(!formaPag){toast('⚠️ Escolha a forma de pagamento (Pix, Cartão ou Dinheiro)');return;}
-  const total=totalCarrinho();
+  const total=totalGeral();
   const pagoEl=document.getElementById('vendaPago');
   let pago=total, troco=0;
   if(formaPag==='dinheiro'){
@@ -845,11 +1032,14 @@ async function concluirVenda(){
     troco=Math.round((pago-total)*100)/100;
   }
   const pagNome=PAGS[formaPag];
+  const entrega=delivery.on?{taxa:taxaEntrega(),end:limparTxt((document.getElementById('delivEnd')||{}).value||'').slice(0,60)}:null;
   const linhas=carrinho.map(l=>({p:produtos.find(x=>x.id===l.id),qtd:l.qtd})).filter(x=>x.p);
   const btn=document.getElementById('btnConcluir');
   concluindo=true; btn.disabled=true;
   try{
-    filaVenda=filaVenda.then(async()=>{ for(const {p,qtd} of linhas) await registrarItemVenda(p,qtd,pagNome); });
+    filaVenda=filaVenda.then(async()=>{ for(const {p,qtd} of linhas) await registrarItemVenda(p,qtd,pagNome);
+      if(entrega&&entrega.taxa>0){ const m=await sbIns('movimentacoes',{tipo:'in',descricao:`Taxa de entrega${entrega.end?' — '+entrega.end:''} [${pagNome}]`,valor:entrega.taxa,codigo:'',ts:new Date().toISOString()}); if(m&&m[0])movimentacoes.push(m[0]); }
+    });
     await filaVenda;
   }catch(e){
     console.error(e); toast('⚠️ Erro ao registrar a venda. Confira a lista antes de repetir.');
@@ -861,7 +1051,7 @@ async function concluirVenda(){
   renderVendas(); renderCaixa(); renderEstoque();
   bip(true);
   if(navigator.vibrate)navigator.vibrate([80,40,80]);
-  setVendaStatus(`✅ <strong>Venda concluída</strong> — ${fmt(total)} (${PAG_ICON[pagNome]} ${pagNome})${troco>0?`<br>Troco entregue: <strong>${fmt(troco)}</strong>`:''}${criticos.length?`<br><span style="font-weight:500">🚨 Estoque baixo: ${criticos.map(escH).join(', ')}</span>`:''}`,'ok');
+  setVendaStatus(`✅ <strong>Venda concluída</strong> — ${fmt(total)} (${PAG_ICON[pagNome]} ${pagNome})${entrega?` · 🛵 entrega ${fmt(entrega.taxa)}`:''}${troco>0?`<br>Troco entregue: <strong>${fmt(troco)}</strong>`:''}${criticos.length?`<br><span style="font-weight:500">🚨 Estoque baixo: ${criticos.map(escH).join(', ')}</span>`:''}`,'ok');
   focarVenda();
 }
 
@@ -877,6 +1067,11 @@ function registrarVenda(){
 }
 
 /* ----- Vendas de hoje + cancelamento (lixeira) ----- */
+function ehTaxa(m){ return m && m.tipo==='in' && /^Taxa de entrega/.test(m.descricao||''); }
+function parseTaxa(m){
+  const r=/^Taxa de entrega(?:\s—\s(.*?))?\s\[(Pix|Cartão|Dinheiro)\]\s*$/.exec((m&&m.descricao)||'');
+  return r?{end:r[1]||'',pag:r[2]}:{end:'',pag:''};
+}
 function ehVenda(m){ return m && m.tipo==='in' && /Venda:\s*\d+x\s/.test(m.descricao||''); }
 function pagDe(m){
   const r=/\s\[(Pix|Cartão|Dinheiro)\]\s*$/.exec((m&&m.descricao)||'');
@@ -898,12 +1093,14 @@ async function delReq(t,id){
 function renderVendasHoje(){
   const el=document.getElementById('vendasHoje'); if(!el)return;
   const hoje=new Date().toDateString();
-  const lista=movimentacoes.filter(m=>ehVenda(m)&&new Date(m.ts).toDateString()===hoje).reverse();
+  const lista=movimentacoes.filter(m=>(ehVenda(m)||ehTaxa(m))&&new Date(m.ts).toDateString()===hoje).reverse();
+  const nVendas=lista.filter(ehVenda).length;
+  const taxas=lista.filter(ehTaxa).reduce((a,m)=>a+(parseFloat(m.valor)||0),0);
   const soma={Pix:0,'Cartão':0,Dinheiro:0,'':0};
   let total=0;
   lista.forEach(m=>{ const v=parseFloat(m.valor)||0; soma[pagDe(m)]+=v; total+=v; });
   const t=document.getElementById('vendasHojeTotal');
-  if(t)t.textContent=lista.length?`${lista.length} venda${lista.length===1?'':'s'}`:'';
+  if(t)t.textContent=nVendas?`${nVendas} venda${nVendas===1?'':'s'}`:'';
   const res=document.getElementById('vendasResumo');
   if(res){
     res.innerHTML=`<div class="resumo">
@@ -912,16 +1109,18 @@ function renderVendasHoje(){
       <div class="res-row"><span>💵 Dinheiro</span><strong>${fmt(soma.Dinheiro)}</strong></div>
       ${soma['']>0?`<div class="res-row"><span>Sem forma de pagamento</span><strong>${fmt(soma[''])}</strong></div>`:''}
       <div class="res-total"><span>Total das vendas do dia</span><strong>${fmt(total)}</strong></div>
+      ${taxas>0?`<div class="res-row" style="color:var(--muted);font-size:var(--fss);border-bottom:none"><span>🛵 incluindo taxas de entrega</span><strong>${fmt(taxas)}</strong></div>`:''}
     </div>`;
   }
   if(!lista.length){el.innerHTML='<div class="empty">Nenhuma venda hoje</div>';return;}
   el.innerHTML=lista.slice(0,40).map(m=>{
     const pv=parseVenda(m);
     const tag=pagDe(m);
+    const tx=ehTaxa(m)?parseTaxa(m):null;
     return `<div class="cf-row">
-      <div class="cf-icon in"><i class="ti ti-shopping-cart"></i></div>
+      <div class="cf-icon in"><i class="ti ti-${ehTaxa(m)?'motorbike':'shopping-cart'}"></i></div>
       <div style="flex:1;min-width:0">
-        <div style="font-size:var(--fsm);font-weight:600">${pv?pv.qtd+'x '+escH(pv.nome):escH(m.descricao)}</div>
+        <div style="font-size:var(--fsm);font-weight:600">${tx?'🛵 Taxa de entrega'+(tx.end?' — '+escH(tx.end):''):(pv?pv.qtd+'x '+escH(pv.nome):escH(m.descricao))}</div>
         <div class="cf-time">${fmtDT(m.ts)}${tag?`<span class="pag-tag">${PAG_ICON[tag]} ${tag}</span>`:''}</div>
       </div>
       <div class="cf-val in">${fmt(m.valor)}</div>
@@ -941,7 +1140,7 @@ async function cancelarVenda(id){
   if(!(await delReq('movimentacoes',m.id))){toast('⚠️ Não foi possível cancelar. Tente de novo.');return;}
   movimentacoes=movimentacoes.filter(x=>x.id!=m.id);
   if(pv){
-    const p=m.codigo ? produtos.find(x=>x.codigo&&String(x.codigo).trim()===String(m.codigo).trim()) : produtos.find(x=>x.nome===pv.nome);
+    const p=(m.codigo?produtos.find(x=>x.codigo&&String(x.codigo).trim()===String(m.codigo).trim()):null)||produtos.find(x=>x.nome===pv.nome);
     if(p){ p.qtd=(parseInt(p.qtd)||0)+pv.qtd; await sbUpd('produtos',p.id,{qtd:p.qtd}); }
     const v=p ? vendas.find(x=>x.prod_id===p.id) : vendas.find(x=>x.nome===pv.nome);
     if(v){
@@ -1129,10 +1328,16 @@ function renderEstoque(){
   const bannerEl=document.getElementById('alertaCriticoBanner');
   if(criticos.length){
     bannerEl.style.display='flex';
-    bannerEl.innerHTML=`<i class="ti ti-alert-triangle"></i> ${criticos.length} produto${criticos.length>1?'s':''} com estoque crítico (≤ mínimo+2): ${criticos.map(p=>`<strong>${p.nome}</strong> (${p.qtd} un)`).join(', ')}`;
+    bannerEl.innerHTML=`<i class="ti ti-alert-triangle"></i><span>${criticos.length} produto${criticos.length>1?'s':''} com estoque crítico (≤ mínimo+2): ${criticos.map(p=>`<strong>${p.nome}</strong> (${p.qtd} un)`).join(', ')}</span>`;
   }else{
     bannerEl.style.display='none';
   }
+  const vVenc=produtos.filter(p=>statusValidade(p)==='alerta'), vVenci=produtos.filter(p=>statusValidade(p)==='vencido');
+  const bv=document.getElementById('alertaValidadeBanner');
+  if(vVenc.length||vVenci.length){
+    bv.style.display='flex';
+    bv.innerHTML=`<i class="ti ti-calendar-time"></i><span>${vVenc.length?`🟡 <strong>Validade (faltam até ${DIAS_ALERTA_VALIDADE} dias):</strong> ${vVenc.map(p=>`${escH(p.nome)} (${fmtData(p.validade).slice(0,5)}, ${textoDias(diasParaVencer(p))})`).join('; ')}`:''}${vVenc.length&&vVenci.length?' &nbsp;·&nbsp; ':''}${vVenci.length?`🔴 <strong>Vencidos:</strong> ${vVenci.map(p=>escH(p.nome)+' ('+fmtData(p.validade).slice(0,5)+')').join('; ')}`:''}</span>`;
+  }else bv.style.display='none';
   const valorTotal=produtos.reduce((a,p)=>a+(parseFloat(p.preco_venda||0)*p.qtd),0);
   const margens=produtos.filter(p=>p.preco_compra&&p.preco_venda&&p.preco_venda>0).map(p=>((p.preco_venda-p.preco_compra)/p.preco_venda*100));
   const margMedia=margens.length?(margens.reduce((a,b)=>a+b,0)/margens.length).toFixed(1):0;
@@ -1140,15 +1345,18 @@ function renderEstoque(){
   document.getElementById('totalAlertas').textContent=alertas;
   document.getElementById('valorEstoque').textContent=fmt(valorTotal);
   document.getElementById('margemMedia').textContent=margMedia+'%';
-  document.getElementById('estoqueCount').textContent=produtos.length?`(${produtos.length})`:'';
+  const lista=filtrarProdutos();
+  document.getElementById('estoqueCount').textContent=produtos.length?(lista.length===produtos.length?`(${produtos.length})`:`(${lista.length} de ${produtos.length})`):'';
 
   const list=document.getElementById('estoqueList');
   if(!produtos.length){list.innerHTML='<div class="empty">Nenhum produto cadastrado</div>';return;}
-  list.innerHTML=produtos.map(p=>{
+  if(!lista.length){list.innerHTML='<div class="empty">Nenhum produto encontrado na pesquisa</div>';return;}
+  list.innerHTML=lista.map(p=>{
     const st=getStatus(p),lbl=getLbl(p);
     const cor=st==='out'?'var(--err-tx)':st==='critical'?'#ff2020':st==='low'?'var(--warn-tx)':'var(--ok-tx)';
+    const sv=statusValidade(p), dv=diasParaVencer(p);
     const marg=p.preco_compra&&p.preco_venda?((p.preco_venda-p.preco_compra)/p.preco_venda*100).toFixed(1):null;
-    return`<div class="prod-card${st==='critical'?' critical':''}">`+`
+    return`<div class="prod-card${st==='critical'?' critical':''}${sv==='alerta'?' venc-alerta':''}${sv==='vencido'?' vencido':''}">`+`
       <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px">
         <div>
           <div style="font-size:var(--fs);font-weight:700">${p.nome}</div>
@@ -1162,11 +1370,13 @@ function renderEstoque(){
         <div><div style="font-size:var(--fsx);color:var(--hint);font-weight:600">COMPRA</div><div style="font-size:12px;font-weight:700;margin-top:5px">${fmt(p.preco_compra||0)}</div></div>
         <div><div style="font-size:var(--fsx);color:var(--hint);font-weight:600">VENDA</div><div style="font-size:12px;font-weight:700;margin-top:5px">${fmt(p.preco_venda||0)}</div></div>
       </div>
+      ${p.validade?`<div class="val-line ${sv}">📅 Validade: <strong>${fmtData(p.validade)}</strong> · ${sv==='vencido'?'🔴 VENCIDO ('+textoDias(dv)+')':sv==='alerta'?'🟡 '+textoDias(dv):textoDias(dv)}</div>`:''}
       ${marg!==null?`<div style="margin-bottom:8px"><span class="profit-pill ${parseFloat(marg)>=0?'pos':'neg'}"><i class="ti ti-trending-${parseFloat(marg)>=0?'up':'down'}"></i> Margem ${marg}%</span></div>`:''}
       <div style="display:flex;gap:6px">
         <button class="btn sm" style="flex:1;justify-content:center" onclick="ajustarQtd(${p.id},-1)"><i class="ti ti-minus"></i> −1</button>
         <button class="btn sm" style="flex:1;justify-content:center" onclick="ajustarQtd(${p.id},1)"><i class="ti ti-plus"></i> +1</button>
-        <button class="btn danger sm" onclick="removerProduto(${p.id})"><i class="ti ti-trash"></i></button>
+        <button class="btn sm" onclick="editarProduto(${p.id})" title="Editar produto"><i class="ti ti-edit"></i> Editar</button>
+        <button class="btn danger sm" onclick="removerProduto(${p.id})" title="Excluir produto"><i class="ti ti-trash"></i></button>
       </div>
     </div>`;
   }).join('');
@@ -1182,10 +1392,20 @@ async function addProduto(){
   if(exDup){
     const add=parseInt(document.getElementById('prodQtd').value)||0;
     if(add<=0){toast('⚠️ Código já cadastrado. Digite a quantidade que chegou para somar ao estoque');return;}
-    if(!confirm(`Este código já está cadastrado como "${exDup.nome}" (estoque atual: ${exDup.qtd}).\nSomar ${add} unidade(s) ao estoque?`))return;
+    const vtxt=document.getElementById('prodValidade').value;
+    const patchDup={};
+    let notaVal='';
+    if(vtxt){
+      if(!exDup.validade){ patchDup.validade=vtxt; notaVal='\nA validade informada será gravada.'; }
+      else notaVal=`\nA validade já cadastrada (${fmtData(exDup.validade)}) não será alterada. Para mudar, use Editar.`;
+    }
+    if(!confirm(`Este código já está cadastrado como "${exDup.nome}" (estoque atual: ${exDup.qtd}).\nSomar ${add} unidade(s) ao estoque?${notaVal}`))return;
     exDup.qtd=(parseInt(exDup.qtd)||0)+add;
-    await sbUpd('produtos',exDup.id,{qtd:exDup.qtd});
-    ['prodNome','prodCodigo','prodQtd','prodPrecoC','prodPrecoV'].forEach(id=>document.getElementById(id).value='');
+    patchDup.qtd=exDup.qtd;
+    Object.assign(exDup,patchDup);
+    await sbUpd('produtos',exDup.id,patchDup);
+    avisarValidadeNaoSalva(patchDup.validade);
+    ['prodNome','prodCodigo','prodQtd','prodPrecoC','prodPrecoV','prodValidade'].forEach(id=>document.getElementById(id).value='');
     document.getElementById('prodMin').value=MIN_PADRAO;
     document.getElementById('margemCalc').style.display='none';
     document.getElementById('scanFeedbackEstoque').style.display='none';
@@ -1195,10 +1415,12 @@ async function addProduto(){
     qtd:parseInt(document.getElementById('prodQtd').value)||0,minimo:(v=>isNaN(v)?MIN_PADRAO:v)(parseInt(document.getElementById('prodMin').value)),
     preco_compra:parseFloat(document.getElementById('prodPrecoC').value)||0,
     preco_venda:parseFloat(document.getElementById('prodPrecoV').value)||0,
-    unit:document.getElementById('prodUnit').value};
+    unit:document.getElementById('prodUnit').value,
+    validade:document.getElementById('prodValidade').value||null};
   const res=await sbIns('produtos',data);
+  avisarValidadeNaoSalva(data.validade);
   if(res)produtos.push(res[0]);
-  ['prodNome','prodCodigo','prodQtd','prodMin','prodPrecoC','prodPrecoV'].forEach(id=>document.getElementById(id).value='');
+  ['prodNome','prodCodigo','prodQtd','prodMin','prodPrecoC','prodPrecoV','prodValidade'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('margemCalc').style.display='none';
   document.getElementById('scanFeedbackEstoque').style.display='none';
   document.getElementById('prodMin').value=MIN_PADRAO;
@@ -1261,7 +1483,11 @@ function renderVendas(){
   renderVendasHoje();
   renderCarrinho();
   const sel=document.getElementById('vendaProd');
-  sel.innerHTML=produtos.map(p=>`<option value="${p.id}">${p.nome} — ${fmt(p.preco_venda||0)}</option>`).join('');
+  const sel0=sel.value;
+  const qb=normBusca((document.getElementById('vendaBusca')||{}).value||'').trim().split(/\s+/).filter(Boolean);
+  const lst=produtos.filter(p=>{ const h=normBusca((p.nome||'')+' '+(p.cat||'')+' '+(p.codigo||'')); return qb.every(t=>h.includes(t)); });
+  sel.innerHTML=lst.map(p=>`<option value="${p.id}">${escH(p.nome)} — ${fmt(p.preco_venda||0)}</option>`).join('')||'<option value="">Nenhum produto encontrado</option>';
+  if([...sel.options].some(o=>o.value===sel0))sel.value=sel0;
   atualizarPrecoVenda();
 
   const totalVendido=vendas.reduce((a,v)=>a+(parseFloat(v.receita)||0),0);
@@ -1321,7 +1547,8 @@ const IMP_MAP = {
   qtd: ['quantidade','qtd','qtde','qtdatual','estoque','estoqueatual'],
   minimo: ['minimo','estoqueminimo','estmin','qtdminima','min'],
   preco_compra: ['precodecompra','precocompra','compra','custo','precodecusto'],
-  preco_venda: ['precodevenda','precovenda','venda','preco','valor']
+  preco_venda: ['precodevenda','precovenda','venda','preco','valor'],
+  validade: ['validade','vencimento','datadevalidade','datadevencimento','dtvalidade']
 };
 
 function normHead(s){return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');}
@@ -1410,6 +1637,8 @@ function processarLinhas(rows,nomeArq){
     if(/^\d[\d.,]*e[+-]?\d+$/i.test(codigo)){probs.push(`Linha ${n} (${nome}): código em notação científica (${codigo}). Envie em .xlsx.`);continue;}
     const q=paraNum(g('qtd')), mn=paraNum(g('minimo')), pc=paraNum(g('preco_compra')), pv=paraNum(g('preco_venda'));
     if(g('qtd')!==''&&q==null){probs.push(`Linha ${n} (${nome}): quantidade inválida`);continue;}
+    const vd=paraData(g('validade'));
+    if(g('validade')!==''&&vd==null){probs.push(`Linha ${n} (${nome}): validade inválida (use dd/mm/aaaa)`);continue;}
     const item={
       nome, codigo,
       cat:limparTxt(g('cat'))||'Outros',
@@ -1417,9 +1646,10 @@ function processarLinhas(rows,nomeArq){
       qtd:q==null?0:Math.max(0,Math.round(q)),
       minimo:mn==null?MIN_PADRAO:Math.max(0,Math.round(mn)),
       preco_compra:pc==null?0:Math.max(0,pc),
-      preco_venda:pv==null?0:Math.max(0,pv)
+      preco_venda:pv==null?0:Math.max(0,pv),
+      validade:vd
     };
-    Object.defineProperty(item,'_p',{enumerable:false,value:{cat:g('cat')!=='',unit:g('unit')!=='',qtd:q!=null,minimo:mn!=null,preco_compra:pc!=null,preco_venda:pv!=null}});
+    Object.defineProperty(item,'_p',{enumerable:false,value:{cat:g('cat')!=='',unit:g('unit')!=='',qtd:q!=null,minimo:mn!=null,preco_compra:pc!=null,preco_venda:pv!=null,validade:vd!=null}});
     if(codigo&&idxCod.has(codigo)){ lista[idxCod.get(codigo)]=item; dup++; }
     else{ if(codigo)idxCod.set(codigo,lista.length); lista.push(item); }
   }
@@ -1462,7 +1692,7 @@ function cancelarImportacao(){
 async function patchProd(id,patch){
   if(USE_LOCAL){lUpd('produtos',id,patch);return true;}
   try{
-    const r=await fetch(`${SB_URL}/rest/v1/produtos?id=eq.${id}`,{method:'PATCH',headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,'Content-Type':'application/json'},body:JSON.stringify(patch)});
+    const r=await fetch(`${SB_URL}/rest/v1/produtos?id=eq.${id}`,{method:'PATCH',headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,'Content-Type':'application/json'},body:JSON.stringify(semValidade(patch))});
     return r.ok;
   }catch{return false;}
 }
@@ -1489,7 +1719,7 @@ async function confirmarImportacao(){
       if(modo==='skip'){ignorados++;continue;}
       const patch={};
       patch.nome=l.nome;
-      ['cat','unit','minimo','preco_compra','preco_venda'].forEach(k=>{ if(impCols.has(k)&&l._p[k])patch[k]=l[k]; });
+      ['cat','unit','minimo','preco_compra','preco_venda','validade'].forEach(k=>{ if(impCols.has(k)&&l._p[k])patch[k]=l[k]; });
       if(impCols.has('qtd')&&l._p.qtd)patch.qtd=(modo==='add')?((parseInt(ex.qtd)||0)+l.qtd):l.qtd;
       atualizar.push({id:ex.id,patch});
     }else novos.push(l);
@@ -1504,7 +1734,7 @@ async function confirmarImportacao(){
         localStorage.setItem('btu_produtos',JSON.stringify(rows));
       }else{
         for(let i=0;i<novos.length;i+=200){
-          const r=await fetch(`${SB_URL}/rest/v1/produtos`,{method:'POST',headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,'Content-Type':'application/json',Prefer:'return=minimal'},body:JSON.stringify(novos.slice(i,i+200))});
+          const r=await fetch(`${SB_URL}/rest/v1/produtos`,{method:'POST',headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,'Content-Type':'application/json',Prefer:'return=minimal'},body:JSON.stringify(semValidade(novos.slice(i,i+200)))});
           if(!r.ok)throw new Error(`O Supabase recusou os dados (erro ${r.status}). Confira se as tabelas foram criadas e se a chave anon está correta.`);
         }
       }
@@ -1538,11 +1768,11 @@ async function aplicarMinimo8(){
 
 function baixarModelo(){
   if(typeof XLSX==='undefined'){toast('⚠️ A biblioteca de planilhas não carregou');return;}
-  const head=['Código de barras','Nome do produto','Categoria','Unidade','Quantidade','Estoque mínimo','Preço de compra','Preço de venda'];
-  const ex1=['7891149107085','Skol 350ml lata','Cervejas','un',120,MIN_PADRAO,2.10,3.50];
-  const ex2=['7894900011487','Coca-Cola 2L','Refrigerantes','un',40,MIN_PADRAO,6.20,9.50];
+  const head=['Código de barras','Nome do produto','Categoria','Unidade','Quantidade','Estoque mínimo','Preço de compra','Preço de venda','Validade'];
+  const ex1=['7891149107085','Skol 350ml lata','Cervejas','un',120,MIN_PADRAO,2.10,3.50,'31/12/2026'];
+  const ex2=['7894900011487','Coca-Cola 2L','Refrigerantes','un',40,MIN_PADRAO,6.20,9.50,''];
   const ws=XLSX.utils.aoa_to_sheet([head,ex1,ex2]);
-  ws['!cols']=[{wch:20},{wch:30},{wch:16},{wch:9},{wch:12},{wch:15},{wch:16},{wch:15}];
+  ws['!cols']=[{wch:20},{wch:30},{wch:16},{wch:9},{wch:12},{wch:15},{wch:16},{wch:15},{wch:13}];
   const info=XLSX.utils.aoa_to_sheet([
     ['Como preencher'],
     ['1. Apague as 2 linhas de exemplo antes de enviar.'],
@@ -1551,7 +1781,8 @@ function baixarModelo(){
     ['4. Quantidade: unidades que você tem no estoque hoje.'],
     ['5. Estoque mínimo: se deixar em branco, o sistema usa '+MIN_PADRAO+'.'],
     ['6. Preços: pode usar vírgula ou ponto (ex.: 3,50).'],
-    ['7. Salve como .xlsx e envie no sistema, em Estoque > Importar produtos por planilha.']
+    ['7. Validade (opcional): data no formato dd/mm/aaaa. O sistema avisa em amarelo quando faltarem 4 dias.'],
+    ['8. Salve como .xlsx e envie no sistema, em Estoque > Importar produtos por planilha.']
   ]);
   info['!cols']=[{wch:100}];
   const wb=XLSX.utils.book_new();
@@ -1626,6 +1857,417 @@ document.getElementById('calcPanel').addEventListener('keydown',function(e){
   else return;
   e.preventDefault(); e.stopPropagation();
 });
+
+/* ========== NUVEM: AVISOS, ATUALIZAÇÃO AUTOMÁTICA, LINK PARA O CELULAR ========== */
+function setNuvem(ok){
+  if(USE_LOCAL)return;
+  const p=document.getElementById('syncPill'), l=document.getElementById('syncLbl');
+  if(p&&l){
+    if(ok){ p.style.background='rgba(100,230,140,0.22)'; l.textContent='Nuvem ✓'; }
+    else { p.style.background='rgba(255,70,70,0.6)'; l.textContent='Sem nuvem ⚠️'; }
+  }
+  if(nuvemOk!==ok){
+    nuvemOk=ok;
+    if(!ok)toast('⚠️ Sem conexão com a nuvem. O que você fizer agora fica só neste aparelho!');
+  }
+  atualizarAvisoNuvem();
+  atualizarAvisoValidade();
+}
+function dadosLocais(){
+  return {produtos:lGet('produtos'),movimentacoes:lGet('movimentacoes'),vendas:lGet('vendas'),feedbacks:lGet('feedbacks')};
+}
+function atualizarAvisoNuvem(){
+  const a=document.getElementById('avisoNuvem'), b=document.getElementById('avisoLocal');
+  if(!a||!b)return;
+  a.style.display=(!USE_LOCAL&&!nuvemOk)?'flex':'none';
+  const L=dadosLocais();
+  const tem=L.produtos.length+L.movimentacoes.length+L.vendas.length+L.feedbacks.length;
+  b.style.display=(!USE_LOCAL&&nuvemOk&&tem>0)?'block':'none';
+  if(tem>0)b.querySelector('span').textContent=`📦 Encontrei dados que ficaram salvos só neste navegador e NÃO estão na nuvem: ${L.produtos.length} produto(s), ${L.movimentacoes.length} lançamento(s) de caixa, ${L.vendas.length} do ranking e ${L.feedbacks.length} feedback(s).`;
+}
+
+async function getRaw(t,ord='id'){
+  const r=await fetch(`${SB_URL}/rest/v1/${t}?order=${ord}.asc`,{headers:SB_H()});
+  if(!r.ok)throw new Error(r.status);
+  return r.json();
+}
+async function postRaw(t,corpo,voltar){
+  const r=await fetch(`${SB_URL}/rest/v1/${t}`,{method:'POST',headers:{...SB_H(),Prefer:voltar?'return=representation':'return=minimal'},body:JSON.stringify(t==='produtos'?semValidade(corpo):corpo)});
+  if(!r.ok)throw new Error(`${t}: erro ${r.status}`);
+  return voltar?r.json():null;
+}
+
+// Busca de novo os dados na nuvem (celular e computador ficam iguais)
+async function recarregarDados(manual){
+  if(USE_LOCAL||concluindo||recarregando||pend>0){ if(manual&&!USE_LOCAL)toast('Aguarde um instante e tente de novo'); return; }
+  recarregando=true;
+  try{
+    const [a,b,c,d]=await Promise.all([getRaw('produtos'),getRaw('movimentacoes'),getRaw('vendas'),getRaw('feedbacks')]);
+    if(concluindo||pend>0)return;
+    produtos=a; movimentacoes=b; vendas=c; feedbacks=d;
+    setNuvem(true);
+    renderAll();
+    if(temValidade!==true)checarColunaValidade();
+    if(manual)toast('🔄 Dados atualizados');
+  }catch{
+    setNuvem(false);
+    if(manual)toast('⚠️ Não consegui falar com a nuvem');
+  }finally{ recarregando=false; }
+}
+setInterval(()=>{ if(!document.hidden)recarregarDados(false); },15000);
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden)recarregarDados(false); });
+
+// Envia para a nuvem o que ficou só neste navegador (sem duplicar produtos com o mesmo código)
+async function migrarLocais(){
+  const L=dadosLocais();
+  if(!confirm(`Enviar para a nuvem os dados que ficaram só neste navegador?\n\n${L.produtos.length} produto(s), ${L.movimentacoes.length} lançamento(s) de caixa, ${L.vendas.length} do ranking, ${L.feedbacks.length} feedback(s).\n\nProdutos com um código que já existe na nuvem não serão duplicados.`))return;
+  try{
+    const nuvem=await getRaw('produtos');
+    const mapa=new Map(); const novos=[];
+    L.produtos.forEach(p=>{
+      const ex=p.codigo?nuvem.find(x=>x.codigo&&String(x.codigo).trim()===String(p.codigo).trim()):null;
+      if(ex)mapa.set(p.id,ex.id); else novos.push(p);
+    });
+    if(novos.length){
+      const res=await postRaw('produtos',novos.map(({id,created_at,...r})=>r),true);
+      res.forEach((r,i)=>mapa.set(novos[i].id,r.id));
+    }
+    if(L.movimentacoes.length)await postRaw('movimentacoes',L.movimentacoes.map(({id,...r})=>r),false);
+    if(L.feedbacks.length)await postRaw('feedbacks',L.feedbacks.map(({id,...r})=>r),false);
+    const vNuvem=await getRaw('vendas');
+    for(const v of L.vendas){
+      const pid=mapa.get(v.prod_id); if(pid==null)continue;
+      const ex=vNuvem.find(x=>x.prod_id===pid);
+      if(ex){
+        const r=await fetch(`${SB_URL}/rest/v1/vendas?id=eq.${ex.id}`,{method:'PATCH',headers:SB_H(),body:JSON.stringify({qtd:(parseInt(ex.qtd)||0)+(parseInt(v.qtd)||0),receita:(parseFloat(ex.receita)||0)+(parseFloat(v.receita)||0)})});
+        if(!r.ok)throw new Error('vendas: erro '+r.status);
+      }else{
+        const {id,...resto}=v; await postRaw('vendas',{...resto,prod_id:pid},false);
+      }
+    }
+    ['produtos','movimentacoes','vendas','feedbacks'].forEach(t=>localStorage.removeItem('btu_'+t));
+    nuvemOk=true; recarregando=false;
+    await recarregarDados(false);
+    atualizarAvisoNuvem();
+    toast('✅ Dados enviados para a nuvem');
+  }catch(e){
+    console.error(e);
+    toast('⚠️ Não consegui enviar. Nada foi apagado. Tente de novo.');
+  }
+}
+function descartarLocais(){
+  if(!confirm('Apagar SÓ os dados que ficaram salvos neste navegador?\n\nO que está na nuvem não é afetado. Isso não pode ser desfeito.'))return;
+  ['produtos','movimentacoes','vendas','feedbacks'].forEach(t=>localStorage.removeItem('btu_'+t));
+  atualizarAvisoNuvem();
+  toast('Dados locais apagados');
+}
+
+// Link que já abre o sistema conectado (para o celular)
+function linkAcesso(){
+  return location.origin+location.pathname+'#url='+encodeURIComponent(SB_URL)+'&key='+encodeURIComponent(SB_KEY);
+}
+async function copiarLinkAcesso(){
+  if(USE_LOCAL||!SB_URL){toast('⚠️ Conecte primeiro à nuvem');return;}
+  try{ await navigator.clipboard.writeText(linkAcesso()); toast('📋 Link copiado! Envie para o seu celular.'); }
+  catch{ prompt('Copie o link abaixo e envie para o seu celular:',linkAcesso()); }
+}
+
+/* ========== PESQUISAR E EDITAR PRODUTOS ========== */
+function normBusca(s){ return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase(); }
+function filtrarProdutos(){
+  const el=document.getElementById('buscaProd');
+  const q=el?normBusca(el.value).trim():'';
+  if(!q)return produtos;
+  const toks=q.split(/\s+/);
+  return produtos.filter(p=>{ const h=normBusca((p.nome||'')+' '+(p.cat||'')+' '+(p.codigo||'')); return toks.every(t=>h.includes(t)); });
+}
+function limparBusca(){ const el=document.getElementById('buscaProd'); el.value=''; renderEstoque(); el.focus(); }
+
+function editarProduto(id){
+  const p=produtos.find(x=>x.id===id); if(!p)return;
+  editandoId=id;
+  const cats=['Cervejas','Refrigerantes','Águas','Destilados','Energéticos','Vinhos','Petiscos','Outros'];
+  document.getElementById('edCat').innerHTML=[...new Set([...cats,p.cat].filter(Boolean))].map(c=>`<option>${escH(c)}</option>`).join('');
+  document.getElementById('edCat').value=p.cat||'Outros';
+  document.getElementById('edUnit').value=p.unit||'un';
+  document.getElementById('edCodigo').value=p.codigo||'';
+  document.getElementById('edNome').value=p.nome||'';
+  document.getElementById('edQtd').value=p.qtd??0;
+  document.getElementById('edMin').value=p.minimo??0;
+  document.getElementById('edPc').value=String(p.preco_compra??'').replace('.',',');
+  document.getElementById('edPv').value=String(p.preco_venda??'').replace('.',',');
+  document.getElementById('edValidade').value=p.validade?String(p.validade).slice(0,10):'';
+  document.getElementById('editModal').classList.add('open');
+  setTimeout(()=>document.getElementById('edNome').focus(),50);
+}
+function fecharEdicao(){
+  document.getElementById('editModal').classList.remove('open');
+  editandoId=null;
+}
+async function salvarEdicao(){
+  const p=produtos.find(x=>x.id===editandoId);
+  if(!p){fecharEdicao();return;}
+  const nome=limparTxt(document.getElementById('edNome').value);
+  if(!nome){toast('⚠️ Informe o nome do produto');return;}
+  const codigo=limparTxt(document.getElementById('edCodigo').value);
+  if(codigo&&produtos.some(x=>x.id!==p.id&&x.codigo&&String(x.codigo).trim()===codigo)){toast('⚠️ Já existe outro produto com este código');return;}
+  const patch={
+    nome, codigo,
+    cat:document.getElementById('edCat').value,
+    unit:document.getElementById('edUnit').value,
+    qtd:Math.max(0,parseInt(document.getElementById('edQtd').value)||0),
+    minimo:Math.max(0,parseInt(document.getElementById('edMin').value)||0),
+    preco_compra:Math.max(0,paraNum(document.getElementById('edPc').value)||0),
+    preco_venda:Math.max(0,paraNum(document.getElementById('edPv').value)||0),
+    validade:document.getElementById('edValidade').value||null
+  };
+  Object.assign(p,patch);
+  await sbUpd('produtos',p.id,patch);
+  avisarValidadeNaoSalva(patch.validade);
+  const v=vendas.find(x=>x.prod_id===p.id);
+  if(v&&(v.nome!==nome||v.cat!==patch.cat)){ v.nome=nome; v.cat=patch.cat; await sbUpd('vendas',v.id,{nome,cat:patch.cat}); }
+  fecharEdicao();
+  renderAll();
+  toast('✅ Produto atualizado');
+}
+
+/* ========== DELIVERY (entrega com a própria moto) ========== */
+function carregarCfgDelivery(){
+  try{ const c=JSON.parse(localStorage.getItem('btu_delivery')||'null'); if(c&&Array.isArray(c.zonas))return c; }catch{}
+  return {acr:0,zonas:[{nome:'Até 2 km',valor:5},{nome:'2 a 4 km',valor:8},{nome:'Mais de 4 km',valor:12},{nome:'',valor:''}],editado:false};
+}
+function zonasValidas(){ return (cfgDelivery.zonas||[]).filter(z=>z.nome&&String(z.nome).trim()&&paraNum(z.valor)!=null); }
+function popularZonas(){
+  const sel=document.getElementById('delivZona'); if(!sel)return;
+  const atual=sel.value;
+  sel.innerHTML=zonasValidas().map((z,i)=>`<option value="${i}">${escH(z.nome)} — ${fmt(paraNum(z.valor))}</option>`).join('')+'<option value="outro">Outro valor (digitar)</option>';
+  if([...sel.options].some(o=>o.value===atual))sel.value=atual;
+}
+function preencherTaxaZona(){
+  const sel=document.getElementById('delivZona'), tx=document.getElementById('delivTaxa');
+  if(sel.value==='outro')return;
+  const z=zonasValidas()[parseInt(sel.value)];
+  tx.value=z?paraNum(z.valor).toFixed(2).replace('.',','):'';
+}
+function mudaZona(){
+  const sel=document.getElementById('delivZona'), tx=document.getElementById('delivTaxa');
+  if(sel.value==='outro'){ tx.value=''; tx.focus(); } else preencherTaxaZona();
+  renderCarrinho();
+}
+function mudaTaxa(){
+  const sel=document.getElementById('delivZona');
+  if(sel.value!=='outro'){
+    const z=zonasValidas()[parseInt(sel.value)], v=paraNum(document.getElementById('delivTaxa').value);
+    if(!z||v==null||Math.abs(v-paraNum(z.valor))>0.001)sel.value='outro';
+  }
+  renderCarrinho();
+}
+function toggleDelivery(){
+  delivery.on=!delivery.on;
+  if(delivery.on){
+    popularZonas();
+    const sel=document.getElementById('delivZona');
+    if(!document.getElementById('delivTaxa').value&&sel.options.length>1){ sel.selectedIndex=0; preencherTaxaZona(); }
+  }
+  renderDelivery();
+  renderCarrinho();
+}
+function renderDelivery(){
+  const b=document.getElementById('btnDelivery'), pn=document.getElementById('delivPanel'), l=document.getElementById('vendaTotalLbl');
+  if(!b||!pn)return;
+  b.classList.toggle('sel',delivery.on);
+  pn.style.display=delivery.on?'block':'none';
+  if(l)l.textContent=delivery.on?'Valor total · 🛵 delivery':'Valor total';
+  const av=document.getElementById('delivAviso'); if(av)av.style.display=(delivery.on&&!cfgDelivery.editado)?'block':'none';
+}
+function renderDeliveryResumo(){
+  const el=document.getElementById('delivResumo'); if(!el)return;
+  if(!delivery.on){ el.innerHTML=''; return; }
+  const base=subtotalBalcao(), prod=totalCarrinho(), acr=r2(prod-base), taxa=taxaEntrega();
+  el.innerHTML=`<div>Produtos (preço de balcão): <strong>${fmt(base)}</strong></div>${acr>0?`<div>Acréscimo do delivery (${String(cfgDelivery.acr).replace('.',',')}%): <strong>${fmt(acr)}</strong></div>`:''}<div>Taxa de entrega: <strong>${fmt(taxa)}</strong></div>`;
+}
+function abrirConfigDelivery(){
+  document.getElementById('cfgAcr').value=String(cfgDelivery.acr||0).replace('.',',');
+  for(let i=0;i<4;i++){
+    const z=(cfgDelivery.zonas||[])[i]||{nome:'',valor:''};
+    document.getElementById('cfgZn'+i).value=z.nome||'';
+    document.getElementById('cfgZv'+i).value=(z.valor===''||z.valor==null)?'':String(z.valor).replace('.',',');
+  }
+  calcCustoEntrega();
+  document.getElementById('delivModal').classList.add('open');
+}
+function fecharConfigDelivery(){
+  document.getElementById('delivModal').classList.remove('open');
+  focarVendaSeAtiva();
+}
+function salvarConfigDelivery(){
+  const acr=paraNum(document.getElementById('cfgAcr').value)||0;
+  if(acr<0||acr>100){toast('⚠️ O acréscimo deve ficar entre 0% e 100%');return;}
+  const zonas=[];
+  for(let i=0;i<4;i++){
+    const nome=limparTxt(document.getElementById('cfgZn'+i).value);
+    const v=paraNum(document.getElementById('cfgZv'+i).value);
+    zonas.push({nome,valor:v==null?'':Math.max(0,r2(v))});
+  }
+  cfgDelivery={acr:r2(acr),zonas,editado:true};
+  try{ localStorage.setItem('btu_delivery',JSON.stringify(cfgDelivery)); }catch{}
+  popularZonas();
+  if(delivery.on)preencherTaxaZona();
+  renderDelivery(); renderCarrinho();
+  fecharConfigDelivery();
+  toast('✅ Configuração de delivery salva');
+}
+function calcCustoEntrega(){
+  const g=id=>paraNum(document.getElementById(id).value)||0;
+  const km=g('ccKm'), cons=g('ccCons'), litro=g('ccLitro'), des=g('ccDes'), tempo=g('ccTempo');
+  const comb=cons>0?(2*km/cons)*litro:0, desg=2*km*des;
+  const total=r2(comb+desg+tempo);
+  document.getElementById('ccRes').innerHTML=km>0
+    ? `Custo estimado de uma entrega de ${String(km).replace('.',',')} km (ida e volta): <strong>${fmt(total)}</strong><br><span style="font-weight:500">combustível ${fmt(r2(comb))} + desgaste ${fmt(r2(desg))} + seu tempo ${fmt(r2(tempo))}</span>`
+    : 'Preencha a distância (só a ida) para ver o custo.';
+}
+
+/* ========== VALIDADE ========== */
+const DIAS_ALERTA_VALIDADE = 4;
+function dataLocal(iso){ const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(iso||''); return m?new Date(+m[1],+m[2]-1,+m[3]):null; }
+function fmtData(iso){ const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(iso||''); return m?`${m[3]}/${m[2]}/${m[1]}`:''; }
+function diasParaVencer(p){
+  const d=dataLocal(p&&p.validade); if(!d)return null;
+  const h=new Date(); h.setHours(0,0,0,0);
+  return Math.round((d-h)/86400000);
+}
+function statusValidade(p){
+  const d=diasParaVencer(p); if(d===null)return null;
+  if(d<0)return 'vencido';
+  return d<=DIAS_ALERTA_VALIDADE?'alerta':'ok';
+}
+function textoDias(d){ return d<0?`vencido há ${-d} dia${-d===1?'':'s'}`:d===0?'vence HOJE':d===1?'falta 1 dia':`faltam ${d} dias`; }
+function validaData(y,m,d){
+  y=+y; m=+m; d=+d;
+  const dt=new Date(Date.UTC(y,m-1,d));
+  if(dt.getUTCFullYear()!==y||dt.getUTCMonth()!==m-1||dt.getUTCDate()!==d)return null;
+  return `${String(y).padStart(4,'0')}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+}
+function paraData(v){
+  if(v==null||v==='')return null;
+  if(typeof v==='number'){
+    if(v>20000&&v<80000)return new Date(Math.round((Math.floor(v)-25569)*86400000)).toISOString().slice(0,10);
+    return null;
+  }
+  const s=String(v).trim();
+  let m=/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2}|\d{4})$/.exec(s);
+  if(m)return validaData(m[3].length===2?'20'+m[3]:m[3],m[2],m[1]);
+  m=/^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  return m?validaData(m[1],m[2],m[3]):null;
+}
+// Enquanto a coluna "validade" não existir no Supabase, ela não é enviada (para não dar erro nas outras gravações)
+function semValidade(x){
+  if(temValidade===true)return x;
+  if(Array.isArray(x))return x.map(r=>{ const {validade,...resto}=r; return resto; });
+  if(x&&typeof x==='object'){ const {validade,...resto}=x; return resto; }
+  return x;
+}
+async function checarColunaValidade(){
+  if(USE_LOCAL){ temValidade=true; atualizarAvisoValidade(); return; }
+  try{
+    const r=await fetch(`${SB_URL}/rest/v1/produtos?select=validade&limit=1`,{headers:SB_H()});
+    if(r.ok)temValidade=true;
+    else if(r.status===400)temValidade=false;
+  }catch{}
+  atualizarAvisoValidade();
+}
+function atualizarAvisoValidade(){
+  const el=document.getElementById('avisoValidade'); if(!el)return;
+  el.style.display=(!USE_LOCAL&&nuvemOk&&temValidade===false)?'block':'none';
+}
+async function copiarSQLValidade(){
+  const sql="ALTER TABLE produtos ADD COLUMN IF NOT EXISTS validade DATE;\nNOTIFY pgrst, 'reload schema';";
+  try{ await navigator.clipboard.writeText(sql); toast('📋 Comando copiado! Cole no SQL Editor do Supabase.'); }
+  catch{ prompt('Copie o comando abaixo:',sql); }
+}
+function avisarValidadeNaoSalva(v){
+  if(v&&!USE_LOCAL&&temValidade!==true)toast('⚠️ A validade NÃO foi salva na nuvem: falta criar a coluna (veja o aviso amarelo no topo)');
+}
+
+/* ========== REPOSIÇÃO ========== */
+const FOLGA_CRITICO = 2;
+function carregarRepFator(){ const v=parseFloat(localStorage.getItem('btu_repfator')); return v>0?v:2; }
+function hojeISO(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function listaReposicao(){
+  const arr=[];
+  produtos.forEach(p=>{
+    const qtd=parseInt(p.qtd)||0, min=parseInt(p.minimo)||0;
+    if(qtd>min+FOLGA_CRITICO)return;
+    const comprar=Math.ceil(min*repFator)-qtd;
+    if(comprar<=0)return;
+    arr.push({p,qtd,min,comprar,custo:r2(comprar*(parseFloat(p.preco_compra)||0))});
+  });
+  arr.sort((a,b)=>((a.qtd<=0?0:1)-(b.qtd<=0?0:1))||((a.min?a.qtd/a.min:0)-(b.min?b.qtd/b.min:0)));
+  return arr;
+}
+function mudaRepFator(){
+  const v=parseFloat(String(document.getElementById('repFator').value).replace(',','.'));
+  if(v>0){ repFator=v; try{localStorage.setItem('btu_repfator',String(v));}catch{} }
+  renderReposicao();
+}
+function renderReposicao(){
+  const el=document.getElementById('repLista'); if(!el)return;
+  const f=document.getElementById('repFator'); if(f&&document.activeElement!==f)f.value=String(repFator).replace('.',',');
+  const L=listaReposicao();
+  const totalUn=L.reduce((a,x)=>a+x.comprar,0), totalCusto=r2(L.reduce((a,x)=>a+x.custo,0));
+  document.getElementById('repQtd').textContent=L.length;
+  document.getElementById('repUn').textContent=totalUn;
+  document.getElementById('repCusto').textContent=fmt(totalCusto);
+  if(!L.length){ el.innerHTML='<div class="empty">Nada para repor agora 👍</div>'; return; }
+  el.innerHTML=L.map(x=>{
+    const st=getStatus(x.p), lbl=getLbl(x.p);
+    return `<div class="cf-row">
+      <div class="cf-icon out"><i class="ti ti-shopping-cart-plus"></i></div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:var(--fsm);font-weight:700">${escH(x.p.nome)} <span class="badge ${st}">${lbl}</span></div>
+        <div class="cf-time">Estoque ${x.qtd} · mín. ${x.min} · comprar <strong>${x.comprar} ${escH(x.p.unit||'un')}</strong> · ${fmt(x.p.preco_compra||0)} cada</div>
+      </div>
+      <div class="cf-val out">${fmt(x.custo)}</div>
+      <button class="btn sm" onclick="receberReposicao(${x.p.id},${x.comprar})" title="Registrar a chegada desta mercadoria"><i class="ti ti-check"></i> Chegou</button>
+    </div>`;
+  }).join('')+`<div class="res-total" style="margin-top:10px;border-radius:var(--rs)"><span>Custo estimado da reposição</span><strong>${fmt(totalCusto)}</strong></div>`;
+}
+async function receberReposicao(id,sug){
+  const p=produtos.find(x=>x.id===id); if(!p)return;
+  const r=prompt(`Quantas unidades de "${p.nome}" chegaram?`,String(sug));
+  if(r===null)return;
+  const n=parseInt(r);
+  if(!(n>0)){toast('⚠️ Informe uma quantidade maior que zero');return;}
+  p.qtd=(parseInt(p.qtd)||0)+n;
+  await sbUpd('produtos',p.id,{qtd:p.qtd});
+  renderAll();
+  toast(`✅ +${n} em ${p.nome}`);
+}
+function textoReposicao(){
+  const L=listaReposicao(); if(!L.length)return '';
+  const d=hojeISO().split('-').reverse().join('/');
+  return `Lista de reposição - ${d}\n\n`+L.map(x=>`• ${x.p.nome}: comprar ${x.comprar} ${x.p.unit||'un'} (estoque ${x.qtd}, mín. ${x.min})`).join('\n')+`\n\nCusto estimado: ${fmt(L.reduce((a,x)=>a+x.custo,0))}`;
+}
+async function copiarReposicao(){
+  const t=textoReposicao(); if(!t){toast('⚠️ Nada para repor agora');return;}
+  try{ await navigator.clipboard.writeText(t); toast('📋 Lista copiada! Cole no WhatsApp.'); }
+  catch{ prompt('Copie a lista abaixo:',t); }
+}
+function baixarReposicao(){
+  const L=listaReposicao(); if(!L.length){toast('⚠️ Nada para repor agora');return;}
+  const dia=hojeISO();
+  const rows=[['Produto','Código','Estoque atual','Mínimo','Comprar','Preço de compra','Custo estimado'],
+    ...L.map(x=>[x.p.nome,x.p.codigo||'',x.qtd,x.min,x.comprar,parseFloat(x.p.preco_compra)||0,x.custo]),
+    ['TOTAL','','','','','',r2(L.reduce((a,x)=>a+x.custo,0))]];
+  if(typeof XLSX!=='undefined'){
+    const ws=XLSX.utils.aoa_to_sheet(rows); ws['!cols']=[{wch:34},{wch:18},{wch:13},{wch:9},{wch:10},{wch:16},{wch:16}];
+    const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Reposição');
+    XLSX.writeFile(wb,`reposicao_${dia}.xlsx`); return;
+  }
+  const csv='\uFEFF'+rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(';')).join('\r\n');
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
+  a.download=`reposicao_${dia}.csv`; document.body.appendChild(a); a.click(); a.remove();
+}
 </script>
 </body>
 </html>
